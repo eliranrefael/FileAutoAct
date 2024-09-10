@@ -1,4 +1,3 @@
-$logFilePath = "$PSScriptRoot\..\logoutput.log"
 #Folder path to watch
 $FolderToWatch = "$PSScriptRoot\..\test"
 $FileTypeFilter = "*"
@@ -8,7 +7,10 @@ $AttributeFilter = [IO.NotifyFilters]::FileName
 . New-Item -Path "$FolderToWatch" -ItemType Directory -Force
 
 # Import the Process-File function from the external file
-. "$PSScriptRoot\FormatFile.ps1"
+Import-Module -Name "$PSScriptRoot\Modules\FormatFile.psm1"
+Import-Module -Name "$PSScriptRoot\Modules\WriteLog.psm1"
+$script:Err = "lala"
+$global:LogFilePath = "$PSScriptRoot\..\logoutput.log"
 
 try {
 
@@ -25,13 +27,13 @@ try {
     $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -Action {
         $EventDetails = $event.SourceEventArgs
         $FileName = $EventDetails.Name
-        Write-Output "File $FileName has been created" | Out-file -FilePath "$logFilePath" -Append
+        Write-Log -m "File $FileName has been created"
         $FilePath = $EventDetails.FullPath
         Format-File -FilePath $FilePath
     }
 
     $FileCreatedWatcher.EnableRaisingEvents = $true
-    Write-Output "Start Watching $FolderToWatch" | Out-file -FilePath "$logFilePath" -Append
+    Write-Log -m "Start Watching $FolderToWatch" 
 
     do {
         Wait-Event -Timeout 10
@@ -39,9 +41,19 @@ try {
 }
 finally {
     $FileCreatedWatcher.EnableRaisingEvents = $false
-    Unregister-Event -SourceIdentifier Created
-    $Handler | Remove-Job
+
+    try {
+        if ($Handler -is [System.Management.Automation.Job]) {
+            $Handler | Stop-Job
+            $Handler | Remove-Job
+        }
+    }
+    catch {
+        Write-Host "warning"
+    }
+
     $FileCreatedWatcher.Dispose()
 
-    Write-Output "Job terminated, Cleanup is done" | Out-file -FilePath "$logFilePath" -Append
+    Write-Log -m "Job terminated, Cleanup is done"
+    Clear-Content -Path $global:LogFilePath -ErrorAction SilentlyContinue
 }
