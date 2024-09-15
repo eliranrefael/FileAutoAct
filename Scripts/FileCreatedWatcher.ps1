@@ -9,8 +9,8 @@ $AttributeFilter = [IO.NotifyFilters]::FileName
 # Import the Process-File function from the external file
 Import-Module -Name "$PSScriptRoot\Modules\FormatFile.psm1"
 Import-Module -Name "$PSScriptRoot\Modules\WriteLog.psm1"
-$script:Err = "lala"
 $global:LogFilePath = "$PSScriptRoot\..\logoutput.log"
+Clear-Content -Path $global:LogFilePath -ErrorAction SilentlyContinue
 
 try {
 
@@ -55,5 +55,4 @@ finally {
     $FileCreatedWatcher.Dispose()
 
     Write-Log -m "Job terminated, Cleanup is done"
-    Clear-Content -Path $global:LogFilePath -ErrorAction SilentlyContinue
 }
