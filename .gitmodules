@@ -1,0 +1,3 @@
+[submodule "Scripts/Modules/WriteLog"]
+	path = Scripts/Modules/WriteLog
+	url = git@gist.github.com:33bd61aa849b84ea78495c2d37d7706d.git

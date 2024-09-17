@@ -1,5 +1,5 @@
 Import-Module -Name "$PSScriptRoot\Modules\FormatFile.psm1"
-Import-Module -Name "$PSScriptRoot\Modules\WriteLog.psm1"
+Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
 
 function Watch-File() {
     Param (
