@@ -1,3 +1,6 @@
+Import-Module -Name "$PSScriptRoot\Modules\FormatFile.psm1"
+Import-Module -Name "$PSScriptRoot\Modules\WriteLog.psm1"
+
 function Watch-File() {
     Param (
         #Path to watch for new files.
@@ -10,7 +13,7 @@ function Watch-File() {
         [Parameter()]
         [ValidateNotNullOrEmpty()]
         [Alias("l")]
-        [string]$LogFilePath = ".\logoutput.log",
+        [string]$LogFilePath = ".\logoutput.txt",
         #Log file path.
         [Parameter()]
         [ValidateNotNullOrEmpty()]
@@ -26,9 +29,6 @@ function Watch-File() {
     New-Item -Path "$FolderToWatch" -ItemType Directory -Force
     New-Item -Path "$LogFilePath" -ItemType File -Force
 
-    Clear-Content -Path $LogFilePath -ErrorAction SilentlyContinue
-    Import-Module -Name "$PSScriptRoot\Modules\FormatFile.psm1"
-    Import-Module -Name "$PSScriptRoot\Modules\WriteLog.psm1"
     $PSDefaultParameterValues['Write-Log:LogFilePath'] = $LogFilePath
 
     try {
@@ -46,16 +46,16 @@ function Watch-File() {
         $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -Action {
             $EventDetails = $event.SourceEventArgs
             $FileName = $EventDetails.Name
-            Write-Log -m "File $FileName has been created"
+            Write-Log -m "File $FileName has been created" -o "$LogFilePath"
             $FilePath = $EventDetails.FullPath
-            Format-File -FilePath $FilePath
+            # Format-File -FilePath $FilePath
         }
 
         $FileCreatedWatcher.EnableRaisingEvents = $true
         Write-Log -m "Start Watching $FolderToWatch" 
 
         do {
-            Wait-Event -Timeout 10
+            Wait-Event -Timeout 1
         }while ($true)
     }
     finally {
