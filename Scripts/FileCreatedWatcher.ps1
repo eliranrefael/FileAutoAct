@@ -88,13 +88,27 @@ function Watch-File() {
         }
 
         
-        #Register event handler   
-        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -Action {
+        #File added event handler  
+        $FileAddedHandler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{LogFilePath = $LogFilePath; FileAction = $Action; FileActionTimeout = $Timeout } -Action {
             $EventDetails = $event.SourceEventArgs
             $FileName = $EventDetails.Name
-            Write-Log -m "File $FileName has been created" -o "$LogFilePath"
             $FilePath = $EventDetails.FullPath
-            # Format-File -FilePath $FilePath
+            $MessageData = $event.MessageData
+            try {
+                Write-Log -m "File $FileName has been created" -o "$($MessageData["LogFilePath"])"
+                $ParsedAction = $($MessageData["FileAction"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName")
+                $FileManipulationJob = Start-job -ScriptBlock {
+                    param($action)
+                    Invoke-Expression $action
+                } -ArgumentList $ParsedAction
+    
+                Wait-Job -Job $FileManipulationJob -Timeout $($MessageData["FileActionTimeout"])
+                $CustomJobResultsEvent = [FileManipulationTerminatedEvent]::new($FileManipulationJob, $FileName)
+                New-Event -SourceIdentifier "$($CustomJobResultsEvent.EventName)" -MessageData @{LogFilePath = $MessageData["LogFilePath"]; JobsData = $CustomJobResultsEvent }
+            }
+            catch {
+                Write-Verbose "An error occurred in the event handler: $_"
+            }
         }
 
         $FileCreatedWatcher.EnableRaisingEvents = $true
