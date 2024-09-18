@@ -144,9 +144,14 @@ function Watch-File() {
         $FileCreatedWatcher.EnableRaisingEvents = $false
 
         try {
-            if ($Handler -is [System.Management.Automation.Job]) {
-                $Handler | Stop-Job
-                $Handler | Remove-Job
+            if ($FileAddedHandler -is [System.Management.Automation.Job]) {
+                $FileAddedHandler | Stop-Job
+                $FileAddedHandler | Remove-Job
+            }
+
+            if ($FileManipulationTerminatedHandler -is [System.Management.Automation.Job]) {
+                $FileManipulationTerminatedHandler | Stop-Job
+                $FileManipulationTerminatedHandler | Remove-Job 
             }
         }
         catch {
