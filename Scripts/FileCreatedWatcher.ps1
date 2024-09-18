@@ -42,8 +42,19 @@ function Watch-File() {
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [ValidateScript({ Test-Path $_ -PathType Container })]
-        [Alias("t")]
+        [Alias("p")]
         [string]$TargetPath,
+        #action to perform on new files.
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [ValidatePattern(".+({FilePath}).*")]
+        [Alias("a")]
+        [string]$Action,
+        #Timeout per manipulation
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [Alias("t")]
+        [int]$Timeout = 3600,
         #Log file path.
         [Parameter()]
         [ValidateNotNullOrEmpty()]
