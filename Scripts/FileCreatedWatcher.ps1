@@ -1,6 +1,41 @@
 Import-Module -Name "$PSScriptRoot\Modules\FormatFile.psm1"
 Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
 
+#can it be simplified by implementing component class? https://learn.microsoft.com/en-us/dotnet/api/system.componentmodel.component?view=net-8.0
+class FileManipulationTerminatedEvent {
+    #Events name
+    [string] $EventName = "FileManipulationTerminated"
+
+    #File's name
+    [string] $FileName
+
+    #The terminated job
+    [System.Management.Automation.Job]$Job
+
+    #Termination Error
+    [string]$TerminationError
+
+    #The time the job took to terminate.
+    [timespan]$JobDuration
+
+    #Constructor
+    FileManipulationTerminatedEvent([System.Management.Automation.Job]$job, [string]$fileName) {
+        $this.Job = $job
+        $this.FileName = $fileName
+
+        # Calculate the duration
+        $durationSeconds = ($job.EndTime - $job.StartTime).TotalSeconds
+        $this.JobDuration = [TimeSpan]::FromSeconds($durationSeconds)
+        $jobsResults = Receive-Job -Job $job -ErrorAction Stop
+        if ($jobsResults -is [System.Management.Automation.ErrorRecord]) {
+            $this.TerminationError = $jobsResults.Exception.Message
+        }
+        elseif ($job.State -eq 'Failed') {
+            $this.TerminationError = $jobsResults
+        }
+    }
+}
+
 function Watch-File() {
     Param (
         #Path to watch for new files.
