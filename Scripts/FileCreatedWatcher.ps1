@@ -111,6 +111,28 @@ function Watch-File() {
             }
         }
 
+        #File manipulation terminated event handler
+        $FileManipulationTerminatedHandler = Register-EngineEvent -SourceIdentifier "FileManipulationTerminated" -Action {
+            $EventsArgs = $event.SourceEventArgs
+            $MessageData = $event.MessageData
+            $JobsData = $MessageData["JobsData"]
+            $FormattedDuration = "{0:D2}{1:D2}{2:D2}" -f $JobsData.JobDuration.Hours, $JobsData.JobDuration.Minutes, $JobsData.JobDuration.Seconds
+            try {
+                if ($null -eq $JobsData.TerminationError) {
+                    Write-log "File manipulation on file $($JobsData.FileName) has ended succesfully. Work duration: $FormattedDuration" -o "$($MessageData["LogFilePath"])"
+                }
+                else {
+                    Write-log "File manipulation on file $($JobsData.FileName) had failed with the following error:$($JobsData.TerminationError). Work duration: $FormattedDuration" -l 2 -o "$($MessageData["LogFilePath"])"
+                }
+        
+                $EventsArgs.Job | Stop-Job
+                $EventsArgs.Job | Remove-Job
+            }
+            catch {
+                Write-Verbose "An error occurred in the event handler: $_"
+            }
+        } 
+
         $FileCreatedWatcher.EnableRaisingEvents = $true
         Write-Log -m "Start Watching $FolderToWatch" 
 
