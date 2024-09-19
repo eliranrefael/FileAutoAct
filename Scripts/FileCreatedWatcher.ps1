@@ -1,31 +1,43 @@
-Import-Module -Name "$PSScriptRoot\Modules\FormatFile.psm1"
+#Import logging module
 Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
 
-#can it be simplified by implementing component class? https://learn.microsoft.com/en-us/dotnet/api/system.componentmodel.component?view=net-8.0
+<#
+.SYNOPSIS
+    Message data object for file manipulation job terminated event.
+
+.DESCRIPTION
+    Help to import all needed data for the job's logging and post termination clean up.
+#>
 class FileManipulationTerminatedEvent {
-    #Events name
+    #Events name.
     [string] $EventName = "FileManipulationTerminated"
 
-    #File's name
+    #File's name.
     [string] $FileName
 
-    #The terminated job
-    [System.Management.Automation.Job]$Job
+    #Log file's path.
+    [string] $LogFilePath
 
-    #Termination Error
-    [string]$TerminationError
+    #The terminated job.
+    [System.Management.Automation.Job] $Job
+
+    #Job's termination error message.
+    [string] $TerminationError
 
     #The time the job took to terminate.
-    [timespan]$JobDuration
+    [timespan] $JobDuration
 
     #Constructor
-    FileManipulationTerminatedEvent([System.Management.Automation.Job]$job, [string]$fileName) {
+    FileManipulationTerminatedEvent([System.Management.Automation.Job]$job, [string]$fileName, [string]$logFilePath) {
         $this.Job = $job
         $this.FileName = $fileName
+        $this.LogFilePath = $logFilePath
 
         # Calculate the duration
         $durationSeconds = ($job.EndTime - $job.StartTime).TotalSeconds
         $this.JobDuration = [TimeSpan]::FromSeconds($durationSeconds)
+
+        # Assess job's results and update the error message if needed.
         $jobsResults = Receive-Job -Job $job -ErrorAction Stop
         if ($jobsResults -is [System.Management.Automation.ErrorRecord]) {
             $this.TerminationError = $jobsResults.Exception.Message
@@ -87,7 +99,6 @@ function Watch-File() {
             NotifyFilter          = $AttributeFilter
         }
 
-        
         #File added event handler  
         $FileAddedHandler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{LogFilePath = $LogFilePath; FileAction = $Action; FileActionTimeout = $Timeout } -Action {
             $EventDetails = $event.SourceEventArgs
