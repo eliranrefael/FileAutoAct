@@ -28,10 +28,10 @@ class FileManipulationTerminatedEvent {
     [timespan] $JobDuration
 
     #Constructor
-    FileManipulationTerminatedEvent([System.Management.Automation.Job]$job, [string]$fileName, [string]$logFilePath) {
+    FileManipulationTerminatedEvent([System.Management.Automation.Job]$job, [string]$fileName) {
         $this.Job = $job
         $this.FileName = $fileName
-        $this.LogFilePath = $logFilePath
+        $this.LogFilePath = $global:logFilePath
 
         # Calculate the duration
         $durationSeconds = ($job.EndTime - $job.StartTime).TotalSeconds
@@ -48,6 +48,29 @@ class FileManipulationTerminatedEvent {
     }
 }
 
+
+<#
+.SYNOPSIS
+    Initiate watch and .
+
+.DESCRIPTION
+    Starts watching target folder for new files and manage desired manipulations on them.
+
+.PARAMETER $FolderToWatch
+    The target folder to watch for new files.
+.PARAMETER $Action
+    The command line to preform on the new files, 
+    must conatin the substring {FilePath} in the location of the file's path,
+    can also conatin the substing {FileName} if necessary.
+.PARAMETER $Timeout
+    Timeout for action process time.
+.PARAMETER $LogFilePath
+    Log file path (Default is .\logoutput.txt).
+.PARAMETER $FileTypeFilter
+    Filter for specific file types to watch for (Default is all).
+.EXAMPLE
+    Watch-File -p "C:\test\" -l "C:\logoutput.txt" -a "Rename-Item -Path '{FilePath}' -NewName 'manipulated-{FileName}'"
+#>
 function Watch-File() {
     Param (
         #Path to watch for new files.
@@ -55,13 +78,13 @@ function Watch-File() {
         [ValidateNotNullOrEmpty()]
         [ValidateScript({ Test-Path $_ -PathType Container })]
         [Alias("p")]
-        [string]$TargetPath,
+        [string]$Path,
         #action to perform on new files.
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [ValidatePattern(".+({FilePath}).*")]
         [Alias("a")]
-        [string]$Action,
+        [string]$Act,
         #Timeout per manipulation
         [Parameter()]
         [ValidateNotNullOrEmpty()]
@@ -71,106 +94,137 @@ function Watch-File() {
         [Parameter()]
         [ValidateNotNullOrEmpty()]
         [Alias("l")]
-        [string]$LogFilePath = ".\logoutput.txt",
+        [string]$LogPath = ".\logoutput.txt",
         #Log file path.
         [Parameter()]
         [ValidateNotNullOrEmpty()]
         [Alias("f")]
-        [string]$FileTypeFilter = "*"
+        [string]$Filter = "*"
     )
 
-    #Folder path to watch
-    $FolderToWatch = $TargetPath
-    $IncludeSubdirectories = $false
-    $AttributeFilter = [IO.NotifyFilters]::FileName
+    $script:FolderToWatch = $Path
+    $script:Action = $Act
+    $script:FileTypeFilter = $Filter
+    $script:TimeoutSeconds = $Timeout 
+    $global:LogFilePath = $LogPath
 
-    New-Item -Path "$FolderToWatch" -ItemType Directory -Force
+
     New-Item -Path "$LogFilePath" -ItemType File -Force
 
-    $PSDefaultParameterValues['Write-Log:LogFilePath'] = $LogFilePath
+    #Sets the log file path as a parameter for Write-Log function through all the functions work.
+    # $global:PSDefaultParameterValues['Write-Log:LogFilePath'] = $script:LogFilePath
 
     try {
 
-        #Initialize FileCreatedWatcher
-        $FileCreatedWatcher = New-Object -TypeName System.IO.FileSystemWatcher -Property @{
-            Path                  = $FolderToWatch
-            Filter                = $FileTypeFilter
-            IncludeSubdirectories = $IncludeSubdirectories
-            NotifyFilter          = $AttributeFilter
-        }
+        $FileAddedHandler = & $script:SetFileCreatedHandler
 
-        #File added event handler  
-        $FileAddedHandler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{LogFilePath = $LogFilePath; FileAction = $Action; FileActionTimeout = $Timeout } -Action {
-            $EventDetails = $event.SourceEventArgs
-            $FileName = $EventDetails.Name
-            $FilePath = $EventDetails.FullPath
-            $MessageData = $event.MessageData
-            try {
-                Write-Log -m "File $FileName has been created" -o "$($MessageData["LogFilePath"])"
-                $ParsedAction = $($MessageData["FileAction"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName")
-                $FileManipulationJob = Start-job -ScriptBlock {
-                    param($action)
-                    Invoke-Expression $action
-                } -ArgumentList $ParsedAction
-    
-                Wait-Job -Job $FileManipulationJob -Timeout $($MessageData["FileActionTimeout"])
-                $CustomJobResultsEvent = [FileManipulationTerminatedEvent]::new($FileManipulationJob, $FileName)
-                New-Event -SourceIdentifier "$($CustomJobResultsEvent.EventName)" -MessageData @{LogFilePath = $MessageData["LogFilePath"]; JobsData = $CustomJobResultsEvent }
-            }
-            catch {
-                Write-Verbose "An error occurred in the event handler: $_"
-            }
-        }
-
-        #File manipulation terminated event handler
-        $FileManipulationTerminatedHandler = Register-EngineEvent -SourceIdentifier "FileManipulationTerminated" -Action {
-            $EventsArgs = $event.SourceEventArgs
-            $MessageData = $event.MessageData
-            $JobsData = $MessageData["JobsData"]
-            $FormattedDuration = "{0:D2}{1:D2}{2:D2}" -f $JobsData.JobDuration.Hours, $JobsData.JobDuration.Minutes, $JobsData.JobDuration.Seconds
-            try {
-                if ($null -eq $JobsData.TerminationError) {
-                    Write-log "File manipulation on file $($JobsData.FileName) has ended succesfully. Work duration: $FormattedDuration" -o "$($MessageData["LogFilePath"])"
-                }
-                else {
-                    Write-log "File manipulation on file $($JobsData.FileName) had failed with the following error:$($JobsData.TerminationError). Work duration: $FormattedDuration" -l 2 -o "$($MessageData["LogFilePath"])"
-                }
-        
-                $EventsArgs.Job | Stop-Job
-                $EventsArgs.Job | Remove-Job
-            }
-            catch {
-                Write-Verbose "An error occurred in the event handler: $_"
-            }
-        } 
-
-        $FileCreatedWatcher.EnableRaisingEvents = $true
-        Write-Log -m "Start Watching $FolderToWatch" 
+        $FileManipulationTerminatedHandler = & $script:SetFileManipulationTerminatedHandler
 
         do {
             Wait-Event -Timeout 1
         }while ($true)
     }
     finally {
-        $FileCreatedWatcher.EnableRaisingEvents = $false
-
-        try {
-            if ($FileAddedHandler -is [System.Management.Automation.Job]) {
-                $FileAddedHandler | Stop-Job
-                $FileAddedHandler | Remove-Job
-            }
-
-            if ($FileManipulationTerminatedHandler -is [System.Management.Automation.Job]) {
-                $FileManipulationTerminatedHandler | Stop-Job
-                $FileManipulationTerminatedHandler | Remove-Job 
-            }
-        }
-        catch {
-            Write-Log -m "Handler could'nt be stopped and removed correctly." -l 1
-        }
-
-        $FileCreatedWatcher.Dispose()
-
-        Write-Log -m "Job terminated, Cleanup is done"
+        & $script:RemoveHandlers -jobs @($FileAddedHandler, $FileManipulationTerminatedHandler)
     }
+}
+
+#Creates and sets the new file created event handler on the target folder
+$script:SetFileCreatedHandler = {
+
+    $Init_Success_Message = "Start Watching $script:FolderToWatch"
+    $HANDLER_CREATION_ERROR = "Error in new file created event handler. Error message:"
+    try {
+
+        $IncludeSubdirectories = $false
+        $AttributeFilter = [IO.NotifyFilters]::FileName        
+        #Initialize FileCreatedWatcher
+        $FileCreatedWatcher = New-Object -TypeName System.IO.FileSystemWatcher -Property @{
+            Path                  = $script:FolderToWatch
+            Filter                = $script:FileTypeFilter
+            IncludeSubdirectories = $IncludeSubdirectories
+            NotifyFilter          = $AttributeFilter
+            EnableRaisingEvents   = $true
+        }
+
+        #File added event handler  
+        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{LogFilePath = $global:LogFilePath; FileAction = $script:Action; FileActionTimeout = $script:TimeoutSeconds } -Action {
+            #Sets the log file path as a parameter for Write-Log function through all the functions work.
+            $EventDetails = $event.SourceEventArgs
+            $FileName = $EventDetails.Name
+            $FilePath = $EventDetails.FullPath
+            $MessageData = $event.MessageData
+            Write-Log -m "File $FileName has been created"
+            $ParsedAction = $($MessageData["FileAction"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName")
+            $FileManipulationJob = Start-job -ScriptBlock {
+                param($action)
+                Invoke-Expression $action
+            } -ArgumentList $ParsedAction
+
+            Wait-Job -Job $FileManipulationJob -Timeout $($MessageData["FileActionTimeout"])
+            $CustomJobResultsEvent = [FileManipulationTerminatedEvent]::new($FileManipulationJob, $FileName)
+            New-Event -SourceIdentifier "$($CustomJobResultsEvent.EventName)" -MessageData @{LogFilePath = $MessageData["LogFilePath"]; JobsData = $CustomJobResultsEvent }
+        }
+        Write-Log -m "$Init_Success_Message"
+        return $Handler
+    }
+    catch {
+        Write-Log -m "$HANDLER_CREATION_ERROR $_" -l 2
+    }
+}
+
+#Creates and sets the file manipulation job terminated handler
+$script:SetFileManipulationTerminatedHandler = {
+    $EVENT_NAME = "FileManipulationTerminated"
+    $HANDLER_CREATION_ERROR = "Error in file manipulation job terminated event handler. Error message:"
+
+    try {
+        $Handler = Register-EngineEvent -SourceIdentifier $EVENT_NAME -Action {
+            $JOB_TERMINATED_SUCCESFULLY_MEESAGE = "File manipulation on file {0} has ended succesfully. Work duration: {1}"
+            $JOB_FAILED_ERROR = "File manipulation on file {0} had failed with the following error:{1}. Work duration: {2}"
+            $LogFilePath = $MessageData["LogFilePath"]
+            $MessageData = $event.MessageData
+            $JobsData = $MessageData["JobsData"]
+            $FormattedDuration = "{0:D2}{1:D2}{2:D2}" -f $JobsData.JobDuration.Hours, $JobsData.JobDuration.Minutes, $JobsData.JobDuration.Seconds
+
+            if ($null -eq $JobsData.TerminationError) {
+                Write-Log -m $($JOB_TERMINATED_SUCCESFULLY_MEESAGE -f $($JobsData.FileName), $FormattedDuration)
+            }
+            else {
+                Write-Log -m $($JOB_FAILED_ERROR -f $($JobsData.FileName), $($JobsData.TerminationError), $FormattedDuration) -l 2
+            }
+            
+            #Clean up.
+            $JobsData.Job | Stop-Job
+            $JobsData.Job | Remove-Job
+        }
+        return $Handler
+    }
+    catch {
+        Write-Log -m "$HANDLER_CREATION_ERROR $_" -l 2
+    }
+}
+
+#Stop, Remove and disponse handlers.
+$script:RemoveHandlers = {
+    param (
+        [object[]]$jobs
+    )
+
+    $Error_Message = "Handler could'nt be stopped and removed correctly."
+    $Success_Message = "Job terminated, Cleanup is done."
+
+    foreach ($job in $jobs) {
+        if ($job -is [System.Management.Automation.Job]) {
+            try {
+                $job | Stop-Job
+                $job | Remove-Job
+                $job.Dispose()
+            }        
+            catch {
+                Write-Log -m $Error_Message -l 1
+            }
+        }
+    }
+    Write-Log -m $Success_Message
 }
