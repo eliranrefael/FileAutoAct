@@ -15,9 +15,6 @@ class FileManipulationTerminatedEvent {
     #File's name.
     [string] $FileName
 
-    #Log file's path.
-    [string] $LogFilePath
-
     #The terminated job.
     [System.Management.Automation.Job] $Job
 
@@ -31,7 +28,6 @@ class FileManipulationTerminatedEvent {
     FileManipulationTerminatedEvent([System.Management.Automation.Job]$job, [string]$fileName) {
         $this.Job = $job
         $this.FileName = $fileName
-        $this.LogFilePath = $global:logFilePath
 
         # Calculate the duration
         $durationSeconds = ($job.EndTime - $job.StartTime).TotalSeconds
@@ -108,9 +104,6 @@ function Watch-File() {
     $script:TimeoutSeconds = $Timeout 
     $global:LogFilePath = $LogPath
 
-
-    New-Item -Path "$LogFilePath" -ItemType File -Force
-
     #Sets the log file path as a parameter for Write-Log function through all the functions work.
     # $global:PSDefaultParameterValues['Write-Log:LogFilePath'] = $script:LogFilePath
 
@@ -148,7 +141,7 @@ $script:SetFileCreatedHandler = {
         }
 
         #File added event handler  
-        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{LogFilePath = $global:LogFilePath; FileAction = $script:Action; FileActionTimeout = $script:TimeoutSeconds } -Action {
+        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{FileAction = $script:Action; FileActionTimeout = $script:TimeoutSeconds } -Action {
             #Sets the log file path as a parameter for Write-Log function through all the functions work.
             $EventDetails = $event.SourceEventArgs
             $FileName = $EventDetails.Name
@@ -182,7 +175,6 @@ $script:SetFileManipulationTerminatedHandler = {
         $Handler = Register-EngineEvent -SourceIdentifier $EVENT_NAME -Action {
             $JOB_TERMINATED_SUCCESFULLY_MEESAGE = "File manipulation on file {0} has ended succesfully. Work duration: {1}"
             $JOB_FAILED_ERROR = "File manipulation on file {0} had failed with the following error:{1}. Work duration: {2}"
-            $LogFilePath = $MessageData["LogFilePath"]
             $MessageData = $event.MessageData
             $JobsData = $MessageData["JobsData"]
             $FormattedDuration = "{0:D2}{1:D2}{2:D2}" -f $JobsData.JobDuration.Hours, $JobsData.JobDuration.Minutes, $JobsData.JobDuration.Seconds
