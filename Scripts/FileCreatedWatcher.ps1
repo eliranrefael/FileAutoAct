@@ -1,6 +1,8 @@
 #Import logging module
 Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
 
+$global:JobList = New-Object System.Collections.ArrayList
+
 <#
 .SYNOPSIS
     Message data object for file manipulation job terminated event.
@@ -9,9 +11,6 @@ Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
     Help to import all needed data for the job's logging and post termination clean up.
 #>
 class FileManipulationTerminatedEvent {
-    #Events name.
-    [string] $EventName = "FileManipulationTerminated"
-
     #File's name.
     [string] $FileName
 
@@ -25,22 +24,17 @@ class FileManipulationTerminatedEvent {
     [timespan] $JobDuration
 
     #Constructor
-    FileManipulationTerminatedEvent([System.Management.Automation.Job]$job, [string]$fileName) {
+    FileManipulationTerminatedEvent([System.Management.Automation.Job]$job) {
         $this.Job = $job
-        $this.FileName = $fileName
+        $this.FileName = $job.Name
 
         # Calculate the duration
-        $durationSeconds = ($job.EndTime - $job.StartTime).TotalSeconds
-        $this.JobDuration = [TimeSpan]::FromSeconds($durationSeconds)
+        $this.JobDuration = New-TimeSpan -Start $job.PSBeginTime -End $job.PSEndTime
 
         # Assess job's results and update the error message if needed.
-        $jobsResults = Receive-Job -Job $job -ErrorAction Stop
-        if ($jobsResults -is [System.Management.Automation.ErrorRecord]) {
-            $this.TerminationError = $jobsResults.Exception.Message
-        }
-        elseif ($job.State -eq 'Failed') {
-            $this.TerminationError = $jobsResults
-        }
+        if (($job.State -ne "Completed") -and ($job.ChildJobs[0].Error)) {           
+            $this.TerminationError = $job.ChildJobs[0].Error          
+        }   
     }
 }
 
@@ -58,8 +52,6 @@ class FileManipulationTerminatedEvent {
     The command line to preform on the new files, 
     must conatin the substring {FilePath} in the location of the file's path,
     can also conatin the substing {FileName} if necessary.
-.PARAMETER $Timeout
-    Timeout for action process time.
 .PARAMETER $LogFilePath
     Log file path (Default is .\logoutput.txt).
 .PARAMETER $FileTypeFilter
@@ -87,7 +79,7 @@ $global:SetFileCreatedHandler = {
         }
 
         #File added event handler  
-        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{FileAction = $script:Action; FileActionTimeout = $script:TimeoutSeconds } -Action {
+        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{FileAction = $script:Action; } -Action {
             #Sets the log file path as a parameter for Write-Log function through all the functions work.
             $EventDetails = $event.SourceEventArgs
             $FilePath = $EventDetails.FullPath
@@ -97,14 +89,11 @@ $global:SetFileCreatedHandler = {
             $MessageData = $event.MessageData
             Write-Log -m "File $FileFullName has been created"
             $ParsedAction = $($MessageData["FileAction"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName").Replace("{FileExtension}", "$FileExtension")
-            $FileManipulationJob = Start-job -ScriptBlock {
-                param($action)
-                Invoke-Expression $action
-            } -ArgumentList $ParsedAction
-
-            Wait-Job -Job $FileManipulationJob -Timeout $($MessageData["FileActionTimeout"])
-            $CustomJobResultsEvent = [FileManipulationTerminatedEvent]::new($FileManipulationJob, $FileFullName)
-            New-Event -SourceIdentifier "$($CustomJobResultsEvent.EventName)" -MessageData @{LogFilePath = $MessageData["LogFilePath"]; JobsData = $CustomJobResultsEvent }
+            $FileManipulationJob = Start-job -Name "$FileFullName" -ScriptBlock {
+                param($Action, $FileName)
+                Invoke-Expression $Action
+            } -ArgumentList $ParsedAction, $FileFullName
+            $global:JobList.Add($FileManipulationJob)
         }
         Write-Log -m "$Init_Success_Message"
         return $Handler
@@ -116,28 +105,35 @@ $global:SetFileCreatedHandler = {
 
 #Creates and sets the file manipulation job terminated handler
 $global:SetFileManipulationTerminatedHandler = {
-    $EVENT_NAME = "FileManipulationTerminated"
     $HANDLER_CREATION_ERROR = "Error in file manipulation job terminated event handler. Error message:"
 
     try {
-        $Handler = Register-EngineEvent -SourceIdentifier $EVENT_NAME -Action {
-            $JOB_TERMINATED_SUCCESFULLY_MEESAGE = "File manipulation on file {0} has ended succesfully. Work duration: {1}"
-            $JOB_FAILED_ERROR = "File manipulation on file {0} had failed with the following error:{1}. Work duration: {2}"
-            $MessageData = $event.MessageData
-            $JobsData = $MessageData["JobsData"]
-            $FormattedDuration = "{0:D2}{1:D2}{2:D2}" -f $JobsData.JobDuration.Hours, $JobsData.JobDuration.Minutes, $JobsData.JobDuration.Seconds
+        $Handler = Register-ObjectEvent -InputObject $script:timer -EventName Elapsed -Action {
+            $TerminatedJobs = $global:JobList.Where({ $_.State -ne 'Running' })
+            if ($TerminatedJobs.Count -eq 0) {
+                return
+            }
 
-            if ($null -eq $JobsData.TerminationError) {
-                Write-Log -m $($JOB_TERMINATED_SUCCESFULLY_MEESAGE -f $($JobsData.FileName), $FormattedDuration)
-            }
-            else {
-                Write-Log -m $($JOB_FAILED_ERROR -f $($JobsData.FileName), $($JobsData.TerminationError), $FormattedDuration) -l 2
-            }
+            $TerminatedJobs | ForEach-Object {
+                $JobsData = [FileManipulationTerminatedEvent]::new($_)
+                $JOB_TERMINATED_SUCCESFULLY_MEESAGE = "File manipulation on file {0} has ended succesfully. Work duration: {1}"
+                $JOB_FAILED_ERROR = "File manipulation on file {0} had failed with the following error:{1}. Work duration: {2}"
+                $FormattedDuration = "{0:D2}:{1:D2}:{2:D2}" -f $JobsData.JobDuration.Hours, $JobsData.JobDuration.Minutes, $JobsData.JobDuration.Seconds
+
+                if ($null -eq $JobsData.TerminationError) {
+                    Write-Log -m $($JOB_TERMINATED_SUCCESFULLY_MEESAGE -f $($JobsData.FileName), $FormattedDuration)
+                }
+                else {
+                    Write-Log -m $($JOB_FAILED_ERROR -f $($JobsData.FileName), $($JobsData.TerminationError), $FormattedDuration) -l 2
+                }
             
-            #Clean up.
-            $JobsData.Job | Stop-Job
-            $JobsData.Job | Remove-Job
+                #Clean up.
+                $JobsData.Job | Stop-Job
+                $JobsData.Job | Remove-Job
+                $global:JobList.Remove($_)
+            }
         }
+        $script:timer.Start()
         return $Handler
     }
     catch {
@@ -183,11 +179,6 @@ function Watch-File() {
         [ValidatePattern(".+({FilePath}).*")]
         [Alias("a")]
         [string]$Act,
-        #Timeout per manipulation
-        [Parameter()]
-        [ValidateNotNullOrEmpty()]
-        [Alias("t")]
-        [int]$Timeout = 3600,
         #Log file path.
         [Parameter()]
         [ValidateNotNullOrEmpty()]
@@ -203,7 +194,6 @@ function Watch-File() {
     $script:FolderToWatch = $Path
     $script:Action = $Act
     $script:FileTypeFilter = $Filter
-    $script:TimeoutSeconds = $Timeout 
     $global:LogFilePath = $LogPath
 
     #Sets the log file path as a parameter for Write-Log function through all the functions work.
@@ -213,10 +203,14 @@ function Watch-File() {
 
         $FileAddedHandler = & $global:SetFileCreatedHandler
 
+        $script:timer = New-Object Timers.Timer
+        $script:timer.Interval = 5000
+        $script:timer.AutoReset = $true
+    
         $FileManipulationTerminatedHandler = & $global:SetFileManipulationTerminatedHandler
 
         do {
-            Wait-Event -Timeout 1
+            Start-Sleep -Seconds 1
         }while ($true)
     }
     catch [System.Exception] {
