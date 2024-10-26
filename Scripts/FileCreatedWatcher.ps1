@@ -1,6 +1,8 @@
 #Import logging module
 Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
 
+$PSDefaultParameterValues = @{"Write-Log:LogFilePath" = "" }
+
 $global:JobList = New-Object System.Collections.ArrayList
 
 <#
@@ -61,7 +63,7 @@ class FileManipulationTerminatedEvent {
 #>
 
 #Creates and sets the new file created event handler on the target folder
-$global:SetFileCreatedHandler = {
+$SetFileCreatedHandler = {
 
     $Init_Success_Message = "Start Watching $script:FolderToWatch"
     $HANDLER_CREATION_ERROR = "Error in new file created event handler. Error message:"
@@ -90,9 +92,8 @@ $global:SetFileCreatedHandler = {
             Write-Log -m "File $FileFullName has been created"
             $ParsedAction = $($MessageData["FileAction"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName").Replace("{FileExtension}", "$FileExtension")
             $FileManipulationJob = Start-job -Name "$FileFullName" -ScriptBlock {
-                param($Action, $FileName)
-                Invoke-Expression $Action
-            } -ArgumentList $ParsedAction, $FileFullName
+                Invoke-Expression $using:ParsedAction
+            }
             $global:JobList.Add($FileManipulationJob)
         }
         Write-Log -m "$Init_Success_Message"
@@ -104,7 +105,7 @@ $global:SetFileCreatedHandler = {
 }
 
 #Creates and sets the file manipulation job terminated handler
-$global:SetFileManipulationTerminatedHandler = {
+$SetFileManipulationTerminatedHandler = {
     $HANDLER_CREATION_ERROR = "Error in file manipulation job terminated event handler. Error message:"
 
     try {
@@ -142,7 +143,7 @@ $global:SetFileManipulationTerminatedHandler = {
 }
 
 #Stop, Remove and disponse handlers.
-$global:RemoveHandlers = {
+$RemoveHandlers = {
     param (
         [object[]]$jobs
     )
@@ -183,7 +184,7 @@ function Watch-File() {
         [Parameter()]
         [ValidateNotNullOrEmpty()]
         [Alias("l")]
-        [string]$LogPath = ".\logoutput.txt",
+        [string]$LogFilePath = ".\logoutput.txt",
         #Log file path.
         [Parameter()]
         [ValidateNotNullOrEmpty()]
@@ -194,20 +195,20 @@ function Watch-File() {
     $script:FolderToWatch = $Path
     $script:Action = $Act
     $script:FileTypeFilter = $Filter
-    $global:LogFilePath = $LogPath
+    $script:PSDefaultParameterValues["Write-Log:LogFilePath"] = "$LogFilePath"
 
     #Sets the log file path as a parameter for Write-Log function through all the functions work.
     # $global:PSDefaultParameterValues['Write-Log:LogFilePath'] = $script:LogFilePath
 
     try {
 
-        $FileAddedHandler = & $global:SetFileCreatedHandler
+        $FileAddedHandler = & $script:SetFileCreatedHandler
 
         $script:timer = New-Object Timers.Timer
         $script:timer.Interval = 5000
         $script:timer.AutoReset = $true
     
-        $FileManipulationTerminatedHandler = & $global:SetFileManipulationTerminatedHandler
+        $FileManipulationTerminatedHandler = & $script:SetFileManipulationTerminatedHandler
 
         do {
             Start-Sleep -Seconds 1
@@ -217,6 +218,6 @@ function Watch-File() {
         Write-Log -m "$_" -l 2
     }
     finally {
-        & $global:RemoveHandlers -jobs @($FileAddedHandler, $FileManipulationTerminatedHandler)
+        & $script:RemoveHandlers -jobs @($FileAddedHandler, $FileManipulationTerminatedHandler)
     }
 }
