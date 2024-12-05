@@ -145,18 +145,31 @@ $SetFileManipulationTerminatedHandler = {
 #Stop, Remove and disponse handlers.
 $RemoveHandlers = {
     param (
-        [object[]]$jobs
+        [object[]]$handlers
     )
 
     $Error_Message = "Handler could'nt be stopped and removed correctly."
     $Success_Message = "Job terminated, Cleanup is done."
 
-    foreach ($job in $jobs) {
+    foreach ($job in $global:JobList) {
         if ($job -is [System.Management.Automation.Job]) {
             try {
                 $job | Stop-Job
                 $job | Remove-Job
                 $job.Dispose()
+            }        
+            catch {
+                Write-Log -m $Error_Message -l 1
+            }
+        }
+    }
+
+    foreach ($handler in $handlers) {
+        if ($handler -is [System.Management.Automation.PSEventSubscriber]) {
+            try {
+                Remove-Event -SourceIdentifier $handler.EventIdentifier
+                $handler.Unsubscribe()
+                $handler.SourceObject.Dispose()
             }        
             catch {
                 Write-Log -m $Error_Message -l 1
@@ -218,6 +231,6 @@ function Watch-File() {
         Write-Log -m "$_" -l 2
     }
     finally {
-        & $script:RemoveHandlers -jobs @($FileAddedHandler, $FileManipulationTerminatedHandler)
+        & $script:RemoveHandlers -handlers @($FileAddedHandler, $FileManipulationTerminatedHandler)
     }
 }
