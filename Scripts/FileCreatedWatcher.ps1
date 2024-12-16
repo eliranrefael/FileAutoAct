@@ -74,21 +74,39 @@ $SetFileCreatedHandler = {
         #Initialize FileCreatedWatcher
         $FileCreatedWatcher = New-Object -TypeName System.IO.FileSystemWatcher -Property @{
             Path                  = $script:FolderToWatch
-            Filter                = $script:FileTypeFilter
             IncludeSubdirectories = $IncludeSubdirectories
             NotifyFilter          = $AttributeFilter
+            Filter                = "*"
             EnableRaisingEvents   = $true
         }
 
+        $data = @{
+            FileAction     = $script:Action
+            FileTypeFilter = $script:FileTypeFilter
+        }
+
         #File added event handler  
-        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{FileAction = $script:Action; } -Action {
+        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData $data -Action {
             #Sets the log file path as a parameter for Write-Log function through all the functions work.
+            $MessageData = $event.MessageData
             $EventDetails = $event.SourceEventArgs
             $FilePath = $EventDetails.FullPath
             $FileName = [System.IO.Path]::GetFileNameWithoutExtension($FilePath)
             $FileExtension = [System.IO.Path]::GetExtension($FilePath).Substring(1)
+            $FileTypeFilterMatch = $false
+            foreach ($filter in $MessageData["FileTypeFilter"]) {
+
+                if ($FileExtension -match $filter) {
+                    $FileTypeFilterMatch = $true
+                    break
+                }
+            }
+
+            if (-not $FileTypeFilterMatch) {
+                return
+            }
+            
             $FileFullName = $EventDetails.Name
-            $MessageData = $event.MessageData
             Write-Log -m "File $FileFullName has been created"
             $ParsedAction = $($MessageData["FileAction"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName").Replace("{FileExtension}", "$FileExtension")
             $FileManipulationJob = Start-job -Name "$FileFullName" -ScriptBlock {
@@ -202,7 +220,7 @@ function Watch-File() {
         [Parameter()]
         [ValidateNotNullOrEmpty()]
         [Alias("f")]
-        [string]$Filter = "*"
+        [string[]]$Filter = @('*')
     )
 
     $script:FolderToWatch = $Path
