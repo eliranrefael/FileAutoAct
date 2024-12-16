@@ -40,28 +40,6 @@ class FileManipulationTerminatedEvent {
     }
 }
 
-
-<#
-.SYNOPSIS
-    Initiate watch and .
-
-.DESCRIPTION
-    Starts watching target folder for new files and manage desired manipulations on them.
-
-.PARAMETER $FolderToWatch
-    The target folder to watch for new files.
-.PARAMETER $Action
-    The command line to preform on the new files, 
-    must conatin the substring {FilePath} in the location of the file's path,
-    can also conatin the substing {FileName} if necessary.
-.PARAMETER $LogFilePath
-    Log file path (Default is .\logoutput.txt).
-.PARAMETER $FileTypeFilter
-    Filter for specific file types to watch for (Default is all).
-.EXAMPLE
-    Watch-File -p "C:\test\" -l "C:\logoutput.txt" -a "Rename-Item -Path '{FilePath}' -NewName 'manipulated-{FileName}'"
-#>
-
 #Creates and sets the new file created event handler on the target folder
 $SetFileCreatedHandler = {
 
@@ -196,6 +174,31 @@ $RemoveHandlers = {
     }
     Write-Log -m $Success_Message
 }
+
+<#
+.SYNOPSIS
+    Watch and make actions on new files.
+
+.DESCRIPTION
+    Starts watching target path for new files added and run a desired action on them.
+
+.PARAMETER $Path
+    The target path to watch on.
+
+.PARAMETER $Act
+    The action to preform on the new files, 
+    must conatin the substring {FilePath} where the files path should be placed,
+    can also contain the substings {FileName} or {FileExtension}, where the file name or file extention should be placed.
+
+.PARAMETER $LogFilePath
+    Log file path (Default is .\logoutput.txt).
+
+.PARAMETER $Filter
+    Filter for specific file types to watch for (Default is all).
+
+.EXAMPLE
+    Watch-File -p "C:\test\" -l "C:\logoutput.txt" -a "Rename-Item -Path '{FilePath}' -NewName 'manipulated-{FileName}' -f 'txt','pdf'"
+#>
 
 function Watch-File() {
     Param (
