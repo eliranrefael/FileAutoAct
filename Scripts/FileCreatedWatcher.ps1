@@ -34,65 +34,67 @@ class FileManipulationTerminatedEvent {
         $this.JobDuration = New-TimeSpan -Start $job.PSBeginTime -End $job.PSEndTime
 
         # Assess job's results and update the error message if needed.
-        if (($job.State -ne "Completed") -and ($job.ChildJobs[0].Error)) {           
+        if (($job.ExitCode -ne 0) -and ($job.ChildJobs[0].Error)) {           
             $this.TerminationError = $job.ChildJobs[0].Error          
-        }   
+        }
     }
 }
-
-
-<#
-.SYNOPSIS
-    Initiate watch and .
-
-.DESCRIPTION
-    Starts watching target folder for new files and manage desired manipulations on them.
-
-.PARAMETER $FolderToWatch
-    The target folder to watch for new files.
-.PARAMETER $Action
-    The command line to preform on the new files, 
-    must conatin the substring {FilePath} in the location of the file's path,
-    can also conatin the substing {FileName} if necessary.
-.PARAMETER $LogFilePath
-    Log file path (Default is .\logoutput.txt).
-.PARAMETER $FileTypeFilter
-    Filter for specific file types to watch for (Default is all).
-.EXAMPLE
-    Watch-File -p "C:\test\" -l "C:\logoutput.txt" -a "Rename-Item -Path '{FilePath}' -NewName 'manipulated-{FileName}'"
-#>
 
 #Creates and sets the new file created event handler on the target folder
 $SetFileCreatedHandler = {
 
-    $Init_Success_Message = "Start Watching $script:FolderToWatch"
-    $HANDLER_CREATION_ERROR = "Error in new file created event handler. Error message:"
+    $Init_Success_Message = "Start Watching $FolderToWatch"
+    $HANDLER_CREATION_ERROR = "Error in new file created event handler. For path: $FolderToWatch. Error message:"
     try {
 
         $IncludeSubdirectories = $false
         $AttributeFilter = [IO.NotifyFilters]::FileName        
         #Initialize FileCreatedWatcher
         $FileCreatedWatcher = New-Object -TypeName System.IO.FileSystemWatcher -Property @{
+
             Path                  = $script:FolderToWatch
-            Filter                = $script:FileTypeFilter
             IncludeSubdirectories = $IncludeSubdirectories
             NotifyFilter          = $AttributeFilter
+            Filter                = "*"
             EnableRaisingEvents   = $true
         }
 
+        $data = @{
+            FileAction     = $script:Action
+            FileTypeFilter = $script:FileTypeFilter
+        }
+
         #File added event handler  
-        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData @{FileAction = $script:Action; } -Action {
+
+        $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData $data -Action {
             #Sets the log file path as a parameter for Write-Log function through all the functions work.
+            $MessageData = $event.MessageData
             $EventDetails = $event.SourceEventArgs
-            $FilePath = $EventDetails.FullPath
+            $FilePath = $EventDetails.FullPath.Replace("'","''")
             $FileName = [System.IO.Path]::GetFileNameWithoutExtension($FilePath)
             $FileExtension = [System.IO.Path]::GetExtension($FilePath).Substring(1)
+            $FileTypeFilterMatch = $false
+            foreach ($filter in $MessageData["FileTypeFilter"]) {
+
+                if ($FileExtension -match $filter) {
+                    $FileTypeFilterMatch = $true
+                    break
+                }
+            }
+
+            if (-not $FileTypeFilterMatch) {
+                return
+            }
+            
             $FileFullName = $EventDetails.Name
-            $MessageData = $event.MessageData
             Write-Log -m "File $FileFullName has been created"
-            $ParsedAction = $($MessageData["FileAction"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName").Replace("{FileExtension}", "$FileExtension")
+            $ParsedAction = $($MessageData["Action"]).Replace("{FilePath}", "$FilePath").Replace("{FileName}", "$FileName").Replace("{FileExtension}", "$FileExtension")
             $FileManipulationJob = Start-job -Name "$FileFullName" -ScriptBlock {
                 Invoke-Expression $using:ParsedAction
+                $ExitCode = $LASTEXITCODE
+                return @{ 
+                    ExitCode = $exitCode
+                }
             }
             $global:JobList.Add($FileManipulationJob)
         }
@@ -109,13 +111,17 @@ $SetFileManipulationTerminatedHandler = {
     $HANDLER_CREATION_ERROR = "Error in file manipulation job terminated event handler. Error message:"
 
     try {
-        $Handler = Register-ObjectEvent -InputObject $script:timer -EventName Elapsed -Action {
+        $Handler = Register-ObjectEvent -InputObject $script:timer -EventName Elapsed -MessageData @{LogFilePath = $LogFilePath; } -Action {
+                        
             $TerminatedJobs = $global:JobList.Where({ $_.State -ne 'Running' })
             if ($TerminatedJobs.Count -eq 0) {
                 return
             }
+            
+            $LogFilePath = $event.MessageData["LogFilePath"]
 
             $TerminatedJobs | ForEach-Object {
+                $PSDefaultParameterValues["Write-Log:LogFilePath"] = "$LogFilePath"
                 $JobsData = [FileManipulationTerminatedEvent]::new($_)
                 $JOB_TERMINATED_SUCCESFULLY_MEESAGE = "File manipulation on file {0} has ended succesfully. Work duration: {1}"
                 $JOB_FAILED_ERROR = "File manipulation on file {0} had failed with the following error:{1}. Work duration: {2}"
@@ -145,13 +151,13 @@ $SetFileManipulationTerminatedHandler = {
 #Stop, Remove and disponse handlers.
 $RemoveHandlers = {
     param (
-        [object[]]$jobs
+        [object[]]$handlers
     )
 
     $Error_Message = "Handler could'nt be stopped and removed correctly."
     $Success_Message = "Job terminated, Cleanup is done."
 
-    foreach ($job in $jobs) {
+    foreach ($job in $global:JobList) {
         if ($job -is [System.Management.Automation.Job]) {
             try {
                 $job | Stop-Job
@@ -163,8 +169,46 @@ $RemoveHandlers = {
             }
         }
     }
+
+    foreach ($handler in $handlers) {
+        if ($handler -is [System.Management.Automation.PSEventSubscriber]) {
+            try {
+                Remove-Event -SourceIdentifier $handler.EventIdentifier
+                $handler.Unsubscribe()
+                $handler.SourceObject.Dispose()
+            }        
+            catch {
+                Write-Log -m $Error_Message -l 1
+            }
+        }
+    }
     Write-Log -m $Success_Message
 }
+
+<#
+.SYNOPSIS
+    Watch and make actions on new files.
+
+.DESCRIPTION
+    Starts watching target path for new files added and run a desired action on them.
+
+.PARAMETER $Path
+    The target path to watch on.
+
+.PARAMETER $Act
+    The action to preform on the new files, 
+    must conatin the substring {FilePath} where the files path should be placed,
+    can also contain the substings {FileName} or {FileExtension}, where the file name or file extention should be placed.
+
+.PARAMETER $LogFilePath
+    Log file path (Default is .\logoutput.txt).
+
+.PARAMETER $Filter
+    Filter for specific file types to watch for (Default is all).
+
+.EXAMPLE
+    Watch-File -p "C:\test\" -l "C:\logoutput.txt" -a "Rename-Item -Path '{FilePath}' -NewName 'manipulated-{FileName}' -f 'txt','pdf'"
+#>
 
 function Watch-File() {
     Param (
@@ -189,13 +233,12 @@ function Watch-File() {
         [Parameter()]
         [ValidateNotNullOrEmpty()]
         [Alias("f")]
-        [string]$Filter = "*"
+        [string[]]$Filter = @('*')
     )
-
     $script:FolderToWatch = $Path
     $script:Action = $Act
     $script:FileTypeFilter = $Filter
-    $script:PSDefaultParameterValues["Write-Log:LogFilePath"] = "$LogFilePath"
+    $PSDefaultParameterValues["Write-Log:LogFilePath"] = "$LogFilePath"
 
     #Sets the log file path as a parameter for Write-Log function through all the functions work.
     # $global:PSDefaultParameterValues['Write-Log:LogFilePath'] = $script:LogFilePath
@@ -218,6 +261,6 @@ function Watch-File() {
         Write-Log -m "$_" -l 2
     }
     finally {
-        & $script:RemoveHandlers -jobs @($FileAddedHandler, $FileManipulationTerminatedHandler)
+        & $script:RemoveHandlers -handlers @($FileAddedHandler, $FileManipulationTerminatedHandler)
     }
 }

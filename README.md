@@ -43,8 +43,8 @@ The idea is to create a PowerShell program that loads at startup with predefined
  ## Development
  
  ### :paperclips:	Structure And Technology
- Programming Language: PowerShell
- Testing Framework: Pester
+ Programming Language: PowerShell v7
+ Testing Framework: Pester v5.6.1
  Git Submodules: **[WriteLog](https://gist.github.com/eliranrefael/33bd61aa849b84ea78495c2d37d7706d)**[^1]
  
 > [!IMPORTANT]
@@ -57,12 +57,11 @@ An initial **[alpha version](https://github.com/eliranrefael/FileAutoAct/tree/v1
 
 The current goal is to develop more tests that will ensure stability, reliability, and concurrency while performing more resource-consuming actions on the new files.
 
-**October's Task List**
-- [] Multiple file extensions filter
-- [] Add a queue for predefining and monitoring parallel work
-- [] Performance test on heavy load action
-- [] Develop more extreme scenarios tests
-- [] Create a user initiation shell dialog script for initiating, predefining, and editing automation jobs on startup
+**Task List**
+- [x] Multiple file extensions filter
+- [ ] Create more extreme scenarios tests
+- [ ] Create a user interface using shell dialog script for initiating, preconfigurations, and start on startup option
+- [ ] improve process's progress and monitoring view.
 
  
  ### :bow_and_arrow: Future Goals
@@ -80,11 +79,10 @@ The current goal is to develop more tests that will ensure stability, reliabilit
  ### :tipping_hand_man:	Example
  1. Open a PowerShell window where the files are downloaded to.
  2. type `. .\Scripts\FileCreatedWatcher.ps1` to import the main function to the session.
- 3. call the function, `Watch-File -p '{Target folder for watching}' -l '{Log file path}' -a "Rename-Item -Path '{FilePath}' -NewName 'manipulated-{FileName}'"`
+ 3. call the function, `Watch-File -p '{Target folder for watching}' -l '{Log file path}' -a "Rename-Item -Path '{FilePath}' -NewName 'manipulated-{FileName}'" -f "txt","pdf","mp3"`
 
  > [!NOTE]
  > - Watched directory path and desired action are the only mandatory parameters.
- > - Parameters for action timeout and file extension filter are also available, please use 'Watch-File --help' for more details.  
 
  
  ### :rabbit2: Tests
