@@ -51,22 +51,24 @@ $SetFileCreatedHandler = {
         $AttributeFilter = [IO.NotifyFilters]::FileName        
         #Initialize FileCreatedWatcher
         $FileCreatedWatcher = New-Object -TypeName System.IO.FileSystemWatcher -Property @{
-
             Path                  = $script:FolderToWatch
             IncludeSubdirectories = $IncludeSubdirectories
             NotifyFilter          = $AttributeFilter
             Filter                = "*"
-            EnableRaisingEvents   = $true
         }
 
+        $FileCreatedWatcher.EnableRaisingEvents = $true
+
         $data = @{
-            FileAction     = $script:Action
+            Action     = $script:Action
             FileTypeFilter = $script:FileTypeFilter
         }
 
         #File added event handler  
 
         $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData $data -Action {
+            $PSDefaultParameterValues["Write-Log:LogFilePath"] = $event.MessageData["LogFilePath"]
+            
             #Sets the log file path as a parameter for Write-Log function through all the functions work.
             $MessageData = $event.MessageData
             $EventDetails = $event.SourceEventArgs
@@ -76,7 +78,7 @@ $SetFileCreatedHandler = {
             $FileTypeFilterMatch = $false
             foreach ($filter in $MessageData["FileTypeFilter"]) {
 
-                if ($FileExtension -match $filter) {
+                if (($filter -eq "*") -or ($FileExtension -match $filter)) {
                     $FileTypeFilterMatch = $true
                     break
                 }
