@@ -33,8 +33,10 @@ class FileManipulationTerminatedEvent {
         # Calculate the duration
         $this.JobDuration = New-TimeSpan -Start $job.PSBeginTime -End $job.PSEndTime
 
+        $result = $job | Receive-Job
+
         # Assess job's results and update the error message if needed.
-        if (($job.ExitCode -ne 0) -and ($job.ChildJobs[0].Error)) {           
+        if (($result.ExitCode -ne 0) -and ($job.ChildJobs[0].Error)) {           
             $this.TerminationError = $job.ChildJobs[0].Error          
         }
     }
@@ -67,7 +69,6 @@ $SetFileCreatedHandler = {
         #File added event handler  
 
         $Handler = Register-ObjectEvent -InputObject $FileCreatedWatcher -EventName Created -MessageData $data -Action {
-            $PSDefaultParameterValues["Write-Log:LogFilePath"] = $event.MessageData["LogFilePath"]
             
             #Sets the log file path as a parameter for Write-Log function through all the functions work.
             $MessageData = $event.MessageData
