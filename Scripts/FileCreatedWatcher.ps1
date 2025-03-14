@@ -1,7 +1,7 @@
 #Import logging module
-Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
+# Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1"
 
-$PSDefaultParameterValues = @{"Write-Log:LogFilePath" = "" }
+# $PSDefaultParameterValues = @{"Write-Log:LogFilePath" = "" }
 
 $global:JobList = New-Object System.Collections.ArrayList
 
@@ -114,17 +114,14 @@ $SetFileManipulationTerminatedHandler = {
     $HANDLER_CREATION_ERROR = "Error in file manipulation job terminated event handler. Error message:"
 
     try {
-        $Handler = Register-ObjectEvent -InputObject $script:timer -EventName Elapsed -MessageData @{LogFilePath = $LogFilePath; } -Action {
+        $Handler = Register-ObjectEvent -InputObject $script:timer -EventName Elapsed -Action {
                         
             $TerminatedJobs = $global:JobList.Where({ $_.State -ne 'Running' })
             if ($TerminatedJobs.Count -eq 0) {
                 return
             }
             
-            $LogFilePath = $event.MessageData["LogFilePath"]
-
             $TerminatedJobs | ForEach-Object {
-                $PSDefaultParameterValues["Write-Log:LogFilePath"] = "$LogFilePath"
                 $JobsData = [FileManipulationTerminatedEvent]::new($_)
                 $JOB_TERMINATED_SUCCESFULLY_MEESAGE = "File manipulation on file {0} has ended succesfully. Work duration: {1}"
                 $JOB_FAILED_ERROR = "File manipulation on file {0} had failed with the following error:{1}. Work duration: {2}"
@@ -238,10 +235,14 @@ function Watch-File() {
         [Alias("f")]
         [string[]]$Filter = @('*')
     )
+
+    #Import logging module
+    Import-Module -Name "$PSScriptRoot\Modules\WriteLog\WriteLog.psm1" -Scope Global -ArgumentList "$LogFilePath"
+
     $script:FolderToWatch = $Path
     $script:Action = $Act
     $script:FileTypeFilter = $Filter
-    $PSDefaultParameterValues["Write-Log:LogFilePath"] = "$LogFilePath"
+    # $PSDefaultParameterValues["Write-Log:LogFilePath"] = "$LogFilePath"
 
     #Sets the log file path as a parameter for Write-Log function through all the functions work.
     # $global:PSDefaultParameterValues['Write-Log:LogFilePath'] = $script:LogFilePath
